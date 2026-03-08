@@ -15,3 +15,12 @@ export type SearchUsersResponseData = {
     totalPages: number;
   };
 };
+
+export type LikeUserItem = {
+  id: string;
+  username: string;
+  name: string;
+  avatarUrl: string | null;
+  isMe?: boolean;
+  isFollowedByMe?: boolean;
+};

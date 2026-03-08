@@ -387,7 +387,7 @@ export default function Header() {
                         className="flex w-full cursor-pointer items-center gap-4 px-6 py-7 text-left transition-colors duration-200 hover:bg-brand-neutral-900/60"
                       >
                         <Image
-                          src="/images/user-greysvg.svg"
+                          src="/images/user-grey.svg"
                           alt=""
                           width={24}
                           height={24}
