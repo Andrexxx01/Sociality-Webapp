@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { sfPro } from "../lib/fonts";
+import AppProviders from "@/providers/appProviders";
 
 export const metadata: Metadata = {
   title: "Sociality Web App",
@@ -14,7 +15,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={sfPro.variable}>
-      <body>{children}</body>
+      <body>
+        <AppProviders>{children}</AppProviders>
+      </body>
     </html>
   );
 }
