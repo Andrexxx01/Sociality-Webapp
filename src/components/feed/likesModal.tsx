@@ -4,13 +4,17 @@ import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check } from "lucide-react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import type { LikeUserItem } from "@/types/user";
+import { followUser, unfollowUser } from "@/services/users/follow.api";
+import { getPostLikes } from "@/services/posts/like.api";
 
 type LikesModalProps = {
   open: boolean;
   onClose: () => void;
-  users: LikeUserItem[];
+  postId: string;
   isAuthenticated: boolean;
 };
 
@@ -30,16 +34,19 @@ function Avatar({ src, alt }: { src?: string | null; alt: string }) {
 function FollowActionButton({
   isFollowing,
   onToggle,
+  isPending,
 }: {
   isFollowing: boolean;
   onToggle: () => void;
+  isPending: boolean;
 }) {
   if (isFollowing) {
     return (
       <Button
         type="button"
         onClick={onToggle}
-        className="h-10 cursor-pointer rounded-full border border-brand-neutral-700 bg-transparent px-5 text-sm font-bold text-brand-neutral-25 transition-all duration-200 hover:border-brand-primary-200 hover:bg-brand-neutral-900"
+        disabled={isPending}
+        className="h-10 cursor-pointer rounded-full border border-brand-neutral-700 bg-transparent px-5 text-sm font-bold text-brand-neutral-25 transition-all duration-200 hover:border-brand-primary-200 hover:bg-brand-neutral-900 disabled:cursor-not-allowed disabled:opacity-70"
       >
         <span className="flex items-center gap-2">
           <Check className="h-4 w-4" strokeWidth={2.4} />
@@ -53,7 +60,8 @@ function FollowActionButton({
     <Button
       type="button"
       onClick={onToggle}
-      className="h-10 cursor-pointer rounded-full border-0 bg-linear-to-r from-brand-primary-200 to-brand-primary-300 px-6 text-sm font-bold text-brand-neutral-25 transition-all duration-200 hover:brightness-110 hover:shadow-[0_0_18px_rgba(127,81,249,0.35)]"
+      disabled={isPending}
+      className="h-10 cursor-pointer rounded-full border-0 bg-linear-to-r from-brand-primary-200 to-brand-primary-300 px-6 text-sm font-bold text-brand-neutral-25 transition-all duration-200 hover:brightness-110 hover:shadow-[0_0_18px_rgba(127,81,249,0.35)] disabled:cursor-not-allowed disabled:opacity-70"
     >
       Follow
     </Button>
@@ -63,46 +71,119 @@ function FollowActionButton({
 export default function LikesModal({
   open,
   onClose,
-  users,
+  postId,
   isAuthenticated,
 }: LikesModalProps) {
   const router = useRouter();
-  const [localUsers, setLocalUsers] = useState<LikeUserItem[]>(users);
+  const [localUsers, setLocalUsers] = useState<LikeUserItem[]>([]);
+
+  const likesQuery = useQuery({
+    queryKey: ["post-likes", postId],
+    queryFn: () => getPostLikes(postId, 1, 50),
+    enabled: open,
+  });
 
   useEffect(() => {
-    setLocalUsers(users);
-  }, [users]);
+    if (!likesQuery.data) return;
+
+    const mappedUsers: LikeUserItem[] = likesQuery.data.data.users.map(
+      (item) => ({
+        id: String(item.id),
+        username: item.username,
+        name: item.name,
+        avatarUrl: item.avatarUrl,
+        isFollowedByMe: item.isFollowedByMe,
+        isMe: item.isMe,
+        followsMe: item.followsMe,
+      }),
+    );
+
+    setLocalUsers(mappedUsers);
+  }, [likesQuery.data]);
 
   useEffect(() => {
     if (!open) return;
+
     function handleKeydown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         onClose();
       }
     }
+
     document.addEventListener("keydown", handleKeydown);
     return () => document.removeEventListener("keydown", handleKeydown);
   }, [open, onClose]);
 
+  const followMutation = useMutation({
+    mutationFn: async ({
+      username,
+      shouldFollow,
+    }: {
+      username: string;
+      shouldFollow: boolean;
+    }) => {
+      if (shouldFollow) {
+        return followUser(username);
+      }
+      return unfollowUser(username);
+    },
+  });
+
   const visibleUsers = useMemo(() => localUsers, [localUsers]);
-  if (!open) return null;
 
   const handleToggleFollow = (userId: string) => {
     if (!isAuthenticated) {
       router.push("/login");
       return;
     }
+
+    const targetUser = localUsers.find((item) => item.id === userId);
+    if (!targetUser || targetUser.isMe) return;
+
+    const nextState = !Boolean(targetUser.isFollowedByMe);
+
     setLocalUsers((prev) =>
       prev.map((item) =>
         item.id === userId
           ? {
               ...item,
-              isFollowedByMe: !item.isFollowedByMe,
+              isFollowedByMe: nextState,
             }
           : item,
       ),
     );
+
+    followMutation.mutate(
+      {
+        username: targetUser.username,
+        shouldFollow: nextState,
+      },
+      {
+        onSuccess: () => {
+          toast.success(
+            nextState
+              ? "User followed successfully"
+              : "User unfollowed successfully",
+          );
+        },
+        onError: () => {
+          setLocalUsers((prev) =>
+            prev.map((item) =>
+              item.id === userId
+                ? {
+                    ...item,
+                    isFollowedByMe: !nextState,
+                  }
+                : item,
+            ),
+          );
+          toast.error("Follow action failed");
+        },
+      },
+    );
   };
+
+  if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-70">
@@ -127,39 +208,60 @@ export default function LikesModal({
               className="h-4.5 w-4.5"
             />
           </button>
+
           <div className="rounded-t-[28px] border border-brand-neutral-800 bg-[rgba(4,10,22,0.98)] shadow-[0_-10px_40px_rgba(0,0,0,0.4)] md:rounded-[28px]">
             <div className="border-b border-brand-neutral-900 px-5 py-4 md:px-6 md:py-5">
               <h2 className="text-[22px] font-bold text-brand-neutral-25 md:text-display-sm">
                 Likes
               </h2>
             </div>
+
             <div className="max-h-[72vh] overflow-y-auto scrollbar-hidden px-3 py-3 md:max-h-140 md:px-4 md:py-4">
-              {visibleUsers.map((item) => (
-                <div
-                  key={item.id}
-                  className="flex items-center justify-between gap-3 rounded-3xl px-3 py-3 transition-colors duration-200 hover:bg-brand-neutral-900/60"
-                >
-                  <div className="flex min-w-0 items-center gap-3">
-                    <div className="h-12 w-12 overflow-hidden rounded-full bg-brand-neutral-900">
-                      <Avatar src={item.avatarUrl} alt={item.name} />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="truncate text-base font-bold text-brand-neutral-25">
-                        {item.name}
-                      </p>
-                      <p className="truncate text-sm font-medium text-brand-neutral-500">
-                        @{item.username}
-                      </p>
-                    </div>
-                  </div>
-                  {!item.isMe ? (
-                    <FollowActionButton
-                      isFollowing={Boolean(item.isFollowedByMe)}
-                      onToggle={() => handleToggleFollow(item.id)}
-                    />
-                  ) : null}
+              {likesQuery.isLoading ? (
+                <div className="px-3 py-6 text-center text-sm font-medium text-brand-neutral-500">
+                  Loading likes...
                 </div>
-              ))}
+              ) : likesQuery.isError ? (
+                <div className="px-3 py-6 text-center text-sm font-medium text-brand-accent-red">
+                  Failed to load likes.
+                </div>
+              ) : visibleUsers.length === 0 ? (
+                <div className="px-3 py-6 text-center text-sm font-medium text-brand-neutral-500">
+                  No likes yet.
+                </div>
+              ) : (
+                visibleUsers.map((item) => (
+                  <div
+                    key={item.id}
+                    className="flex items-center justify-between gap-3 rounded-3xl px-3 py-3 transition-colors duration-200 hover:bg-brand-neutral-900/60"
+                  >
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div className="h-12 w-12 overflow-hidden rounded-full bg-brand-neutral-900">
+                        <Avatar src={item.avatarUrl} alt={item.name} />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="truncate text-base font-bold text-brand-neutral-25">
+                          {item.name}
+                        </p>
+                        <p className="truncate text-sm font-medium text-brand-neutral-500">
+                          @{item.username}
+                        </p>
+                      </div>
+                    </div>
+
+                    {!item.isMe ? (
+                      <FollowActionButton
+                        isFollowing={Boolean(item.isFollowedByMe)}
+                        onToggle={() => handleToggleFollow(item.id)}
+                        isPending={
+                          followMutation.isPending &&
+                          followMutation.variables?.username === item.username
+                        }
+                      />
+                    ) : null}
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </div>
