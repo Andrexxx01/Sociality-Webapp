@@ -11,7 +11,7 @@ The application allows users to create posts, interact with other users, and exp
 
 Production Deployment:
 
-https://your-vercel-url.vercel.app
+https://sociality-webapp.vercel.app
 
 ---
 
