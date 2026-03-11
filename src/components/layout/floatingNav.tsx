@@ -4,10 +4,12 @@ import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
+type FloatingNavKey = "home" | "create" | "profile";
+
 type FloatingNavProps = {
-  isAuthenticated: boolean;
-  activeKey?: "home" | "profile";
-  onHomeClick: () => void;
+  activeKey?: FloatingNavKey;
+  isAuthenticated?: boolean;
+  onHomeClick?: () => void;
 };
 
 export default function FloatingNav({

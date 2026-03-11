@@ -24,3 +24,13 @@ export type LikeUserItem = {
   isMe?: boolean;
   isFollowedByMe?: boolean;
 };
+
+export type FollowListResponseData = {
+  users: SearchUserItem[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+};

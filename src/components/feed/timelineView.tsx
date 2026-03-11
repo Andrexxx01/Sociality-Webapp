@@ -8,14 +8,12 @@ import TimelineTabs, {
 } from "@/components/feed/timelineTabs";
 import PostCard from "@/components/feed/postCard";
 import { useAppSelector } from "@/hooks/useAppSelector";
-import { MOCK_TIMELINE_POSTS } from "@/mock/mockPosts";
 import { House } from "lucide-react";
 import { useExplorePostsQuery } from "@/services/posts/posts.query";
 import { useSavedPostsQuery } from "@/services/posts/saved.query";
+import { useFeedInfiniteQuery } from "@/services/feed/feed.query";
 import type { TimelinePost } from "@/types/post";
 import type { PostItem } from "@/services/posts/posts.api";
-
-const PAGE_SIZE = 4;
 
 function FeedEmptyState() {
   return (
@@ -25,6 +23,26 @@ function FeedEmptyState() {
       </div>
       <p className="mt-8 text-[20px] font-medium leading-9 text-brand-neutral-400 md:text-[22px]">
         No posts yet. Follow someone or create your first post ✨
+      </p>
+    </div>
+  );
+}
+
+function FeedLoadingState() {
+  return (
+    <div className="flex min-h-[40vh] items-center justify-center">
+      <p className="text-[18px] font-medium text-brand-neutral-500">
+        Loading feed...
+      </p>
+    </div>
+  );
+}
+
+function FeedErrorState() {
+  return (
+    <div className="flex min-h-[40vh] items-center justify-center text-center">
+      <p className="text-[18px] font-medium text-brand-accent-red">
+        Failed to load feed posts.
       </p>
     </div>
   );
@@ -87,16 +105,24 @@ export default function TimelineView() {
   const isAuthenticated = Boolean(user);
 
   const [activeTab, setActiveTab] = useState<TimelineTabKey>("feed");
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
+
+  const {
+    data: feedData,
+    isLoading: isFeedLoading,
+    isError: isFeedError,
+    fetchNextPage: fetchNextFeedPage,
+    hasNextPage: hasNextFeedPage,
+    isFetchingNextPage: isFetchingNextFeedPage,
+  } = useFeedInfiniteQuery(10);
 
   const {
     data: exploreData,
     isLoading: isExploreLoading,
     isError: isExploreError,
-    fetchNextPage,
-    hasNextPage,
-    isFetchingNextPage,
+    fetchNextPage: fetchNextExplorePage,
+    hasNextPage: hasNextExplorePage,
+    isFetchingNextPage: isFetchingNextExplorePage,
   } = useExplorePostsQuery();
 
   const { data: savedData } = useSavedPostsQuery(isAuthenticated);
@@ -105,13 +131,20 @@ export default function TimelineView() {
     return savedData?.map((p) => String(p.id)) ?? [];
   }, [savedData]);
 
-  const feedPosts = useMemo(() => {
-    return isAuthenticated ? MOCK_TIMELINE_POSTS : [];
-  }, [isAuthenticated]);
+  const feedPosts = useMemo<TimelinePost[]>(() => {
+    if (!isAuthenticated) return [];
+
+    const rawPosts = feedData?.pages.flatMap((page) => page.items ?? []) ?? [];
+
+    return rawPosts.map((post) => ({
+      ...post,
+      savedByMe: savedIds.includes(String(post.id)),
+    }));
+  }, [feedData, isAuthenticated, savedIds]);
 
   const explorePosts = useMemo<TimelinePost[]>(() => {
     const rawPosts: PostItem[] =
-      exploreData?.pages.flatMap((page) => page.posts) ?? [];
+      exploreData?.pages.flatMap((page) => page.posts ?? []) ?? [];
 
     return rawPosts.map((post) =>
       mapExplorePostToTimelinePost({
@@ -121,26 +154,43 @@ export default function TimelineView() {
     );
   }, [exploreData, savedIds]);
 
-  const activePosts = activeTab === "feed" ? feedPosts : explorePosts;
-
   useEffect(() => {
-    setVisibleCount(PAGE_SIZE);
-  }, [activeTab, isAuthenticated]);
-
-  useEffect(() => {
-    if (activeTab !== "feed") return;
-    if (!activePosts.length) return;
-
     const node = sentinelRef.current;
     if (!node) return;
+
+    const shouldObserveFeed =
+      activeTab === "feed" &&
+      isAuthenticated &&
+      Boolean(hasNextFeedPage) &&
+      !isFetchingNextFeedPage;
+
+    const shouldObserveExplore =
+      activeTab === "explore" &&
+      Boolean(hasNextExplorePage) &&
+      !isFetchingNextExplorePage;
+
+    if (!shouldObserveFeed && !shouldObserveExplore) return;
 
     const observer = new IntersectionObserver(
       (entries) => {
         const entry = entries[0];
-        if (entry?.isIntersecting) {
-          setVisibleCount((prev) =>
-            Math.min(prev + PAGE_SIZE, activePosts.length),
-          );
+
+        if (!entry?.isIntersecting) return;
+
+        if (
+          activeTab === "feed" &&
+          hasNextFeedPage &&
+          !isFetchingNextFeedPage
+        ) {
+          fetchNextFeedPage();
+        }
+
+        if (
+          activeTab === "explore" &&
+          hasNextExplorePage &&
+          !isFetchingNextExplorePage
+        ) {
+          fetchNextExplorePage();
         }
       },
       { rootMargin: "240px" },
@@ -148,31 +198,16 @@ export default function TimelineView() {
 
     observer.observe(node);
     return () => observer.disconnect();
-  }, [activePosts.length, activeTab]);
-
-  useEffect(() => {
-    if (activeTab !== "explore") return;
-
-    const node = sentinelRef.current;
-    if (!node) return;
-    if (!hasNextPage) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const entry = entries[0];
-
-        if (entry?.isIntersecting && hasNextPage && !isFetchingNextPage) {
-          fetchNextPage();
-        }
-      },
-      { rootMargin: "240px" },
-    );
-
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [activeTab, fetchNextPage, hasNextPage, isFetchingNextPage]);
-
-  const visibleFeedPosts = feedPosts.slice(0, visibleCount);
+  }, [
+    activeTab,
+    isAuthenticated,
+    fetchNextFeedPage,
+    hasNextFeedPage,
+    isFetchingNextFeedPage,
+    fetchNextExplorePage,
+    hasNextExplorePage,
+    isFetchingNextExplorePage,
+  ]);
 
   return (
     <main className="min-h-dvh bg-black text-brand-neutral-25">
@@ -184,9 +219,15 @@ export default function TimelineView() {
         {activeTab === "feed" ? (
           !isAuthenticated ? (
             <FeedEmptyState />
+          ) : isFeedLoading ? (
+            <FeedLoadingState />
+          ) : isFeedError ? (
+            <FeedErrorState />
+          ) : feedPosts.length === 0 ? (
+            <FeedEmptyState />
           ) : (
             <div className="mx-auto max-w-245 divide-y divide-brand-neutral-900">
-              {visibleFeedPosts.map((post) => (
+              {feedPosts.map((post) => (
                 <PostCard
                   key={post.id}
                   post={post}
@@ -194,8 +235,14 @@ export default function TimelineView() {
                 />
               ))}
 
-              {visibleFeedPosts.length < feedPosts.length ? (
+              {hasNextFeedPage ? (
                 <div ref={sentinelRef} className="h-8 w-full" />
+              ) : null}
+
+              {isFetchingNextFeedPage ? (
+                <div className="py-6 text-center text-[16px] font-medium text-brand-neutral-500">
+                  Loading more posts...
+                </div>
               ) : null}
             </div>
           )
@@ -215,11 +262,11 @@ export default function TimelineView() {
               />
             ))}
 
-            {hasNextPage ? (
+            {hasNextExplorePage ? (
               <div ref={sentinelRef} className="h-8 w-full" />
             ) : null}
 
-            {isFetchingNextPage ? (
+            {isFetchingNextExplorePage ? (
               <div className="py-6 text-center text-[16px] font-medium text-brand-neutral-500">
                 Loading more posts...
               </div>

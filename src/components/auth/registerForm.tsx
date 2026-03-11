@@ -63,7 +63,7 @@ export default function RegisterForm() {
       dispatch(setCredentials(data));
       saveAuthSession(data);
       toast.success("Register successful");
-      router.replace("/feed");
+      router.replace("/login");
     },
     onError: (error) => {
       toast.error(getErrorMessage(error));
